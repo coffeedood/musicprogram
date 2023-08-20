@@ -1,0 +1,35 @@
+import speech_recognition as sr
+import subprocess
+
+def main():
+    recognizer = sr.Recognizer()
+    
+    with sr.Microphone() as source:
+        print("Do you want to use your microphone? (yes/no)")
+        response = input().lower()
+
+        if response == "yes":
+            print("Listening for a command...")
+            try:
+                audio = recognizer.listen(source, timeout=5)
+                command = recognizer.recognize_google(audio)
+                print(f"User said: {command}")
+                execute_command(command)
+            except sr.WaitTimeoutError:
+                print("Timeout: No speech detected.")
+            except sr.UnknownValueError:
+                print("Error: Could not understand audio.")
+        else:
+            print("Microphone not used.")
+
+def execute_command(command):
+    if command:
+        command = command.strip().lower()
+        if command:
+            if command.endswith(".m3u"):
+                subprocess.run(["open", f"'{command}'"])
+            else:
+                print("Invalid command. Please provide a valid .m3u playlist name.")
+
+if __name__ == "__main__":
+    main()
