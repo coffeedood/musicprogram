@@ -1,0 +1,45 @@
+import os
+import shutil
+import tkinter as tk
+from tkinter import filedialog
+
+# Function to get the source directory from the user using a GUI window
+def get_source_directory():
+    root = tk.Tk()
+    root.withdraw()
+    source_directory = filedialog.askdirectory(title="Select Source Directory")
+    return source_directory
+
+# Function to get the target directory from the user using a GUI window
+def get_target_directory():
+    root = tk.Tk()
+    root.withdraw()
+    target_directory = filedialog.askdirectory(title="Select Target Directory")
+    return target_directory
+
+# Function to move a file to a new directory
+def move_file_to_directory(source_file, target_directory):
+    file_name = os.path.splitext(os.path.basename(source_file))[0]  # Get the file name without extension
+    file_number = len(os.listdir(target_directory)) + 1
+    new_directory_name = f"{file_name}_{file_number}"
+    new_directory_path = os.path.join(target_directory, new_directory_name)
+    os.makedirs(new_directory_path, exist_ok=True)
+    shutil.move(source_file, new_directory_path)
+
+# Function to move all MKV files from source to target directory
+def move_mkv_files(source, target):
+    for dirpath, dirnames, filenames in os.walk(source):
+        for filename in filenames:
+            if filename.endswith('.mkv'):
+                source_file_path = os.path.join(dirpath, filename)
+                move_file_to_directory(source_file_path, target)
+
+# Get the source and target directories from the user
+source_directory = get_source_directory()
+target_directory = get_target_directory()
+
+# Move all MKV files to folders with modified names in the target directory
+move_mkv_files(source_directory, target_directory)
+
+# Display a success message
+print("All mkv files have been moved to folders with modified names in the target directory.")
