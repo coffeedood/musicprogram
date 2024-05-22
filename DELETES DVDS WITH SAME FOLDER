@@ -1,0 +1,41 @@
+import os
+import shutil
+import tkinter as tk
+from tkinter import filedialog
+
+def find_folders_info(folder):
+    folder_info = {}
+    for root, dirs, files in os.walk(folder):
+        for dir_name in dirs:
+            dir_path = os.path.join(root, dir_name)
+            relative_path = os.path.relpath(dir_path, folder)
+            size = sum(os.path.getsize(os.path.join(dir_path, file)) for file in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, file)))
+            folder_info[relative_path] = size
+    return folder_info
+
+def delete_duplicate_folders(source_folder, target_folder):
+    source_folders = find_folders_info(source_folder)
+    target_folders = find_folders_info(target_folder)
+    
+    for folder_name_source, size_source in source_folders.items():
+        for folder_name_target, size_target in target_folders.items():
+            if folder_name_source == folder_name_target and size_source == size_target:
+                target_path = os.path.join(target_folder, folder_name_target)
+                if os.path.exists(target_path) and os.path.isdir(target_path):
+                    try:
+                        shutil.rmtree(target_path)
+                        print(f"Deleted folder: {target_path}")
+                    except Exception as e:
+                        print(f"Failed to delete folder {target_path}: {e}")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.withdraw()
+
+    source_folder = filedialog.askdirectory(title="Select Source Folder")
+    target_folder = filedialog.askdirectory(title="Select Target Folder")
+
+    if source_folder and target_folder:
+        delete_duplicate_folders(source_folder, target_folder)
+    else:
+        print("Source or target folder not selected.")
