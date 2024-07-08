@@ -1,0 +1,129 @@
+import os
+import pygame
+from urllib.parse import unquote
+
+class MusicPlayer:
+    def __init__(self):
+        pygame.init()
+        pygame.mixer.init()
+        self.playlist = []
+        self.paused = False
+
+    def load_playlist(self, playlist_path):
+        try:
+            if not os.path.isfile(playlist_path):
+                print(f"Error: Playlist file '{playlist_path}' not found.")
+                return False
+            
+            self.stop()  # Stop current playback
+            self.playlist.clear()  # Clear current playlist
+
+            with open(playlist_path, 'r') as f:
+                lines = f.readlines()
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('#EXTM3U') or line.startswith('#EXTINF'):
+                        continue  # Skip metadata lines
+                    elif line.startswith('file://'):
+                        # Replace 'file://' and decode URL-encoded path
+                        media_path = line.replace('file://', '')
+                        media_path = unquote(media_path)  # Decode URL-encoded paths
+
+                        # On Windows, replace '/' with '\\' in path and remove leading '/'
+                        media_path = media_path.lstrip('/').replace('/', '\\')
+
+                        if os.path.exists(media_path):
+                            self.playlist.append(media_path)
+                        else:
+                            print(f"Skipping unknown or inaccessible file: {media_path}")
+                    else:
+                        print(f"Skipping unrecognized entry in playlist: {line}")
+
+            print(f"Playlist '{os.path.basename(playlist_path)}' loaded successfully.")
+            return True
+
+        except Exception as e:
+            print(f"Error occurred while loading playlist '{playlist_path}': {e}")
+            return False
+
+    def play(self):
+        if not self.playlist:
+            print("Playlist is empty. Load a playlist first.")
+            return
+
+        if self.paused:
+            pygame.mixer.music.unpause()
+            self.paused = False
+        else:
+            pygame.mixer.music.load(self.playlist[0])
+            pygame.mixer.music.play()
+
+    def pause(self):
+        if pygame.mixer.music.get_busy():
+            pygame.mixer.music.pause()
+            self.paused = True
+        else:
+            print("No music is currently playing.")
+
+    def stop(self):
+        pygame.mixer.music.stop()
+        self.playlist.clear()
+
+    def next_track(self):
+        pygame.mixer.music.stop()
+        if self.playlist:
+            self.playlist.append(self.playlist.pop(0))
+            self.play()
+
+    def previous_track(self):
+        pygame.mixer.music.stop()
+        if self.playlist:
+            self.playlist.insert(0, self.playlist.pop())
+            self.play()
+
+    def quit(self):
+        pygame.quit()
+
+def main():
+    player = MusicPlayer()
+
+    while True:
+        command = input("Enter command (play / pause / next / previous / stop / quit / <playlist_path>): ").strip().lower()
+
+        if command == "play":
+            player.play()
+        elif command == "pause":
+            player.pause()
+        elif command == "next":
+            player.next_track()
+        elif command == "previous":
+            player.previous_track()
+        elif command == "stop":
+            player.stop()
+        elif command == "quit":
+            player.quit()
+            return
+        else:
+            # Assume it's a new playlist name or path
+            playlist_name = command
+
+            if not playlist_name.endswith(".m3u"):
+                playlist_name += ".m3u"
+
+            # Check if playlist_name is a full path
+            if os.path.isabs(playlist_name):
+                playlist_path = playlist_name
+            else:
+                playlist_path = os.path.join("C:\\Users\\coffe", playlist_name)  # Adjust the directory path accordingly
+
+            print(f"Playlist path: {playlist_path}")
+
+            if not os.path.isfile(playlist_path):
+                print(f"Error: Playlist file '{playlist_name}' not found.")
+                continue
+
+            if player.load_playlist(playlist_path):
+                player.play()
+
+if __name__ == "__main__":
+    main()
