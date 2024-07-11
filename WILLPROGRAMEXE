@@ -1,0 +1,278 @@
+import tkinter as tk
+from tkinter import messagebox, simpledialog
+import json
+import os
+
+# Use os.path.expanduser to get user-specific directory
+FILE_PATH = os.path.expanduser('~/contacts.json')
+
+def save_contacts_to_json(contacts):
+    try:
+        with open(FILE_PATH, 'w') as f:
+            json.dump(contacts, f, indent=4)
+    except IOError as e:
+        messagebox.showerror("Error", f"Unable to save contacts: {e}")
+
+def load_contacts_from_json():
+    contacts = []
+    try:
+        with open(FILE_PATH, 'r') as f:
+            contacts = json.load(f)
+    except FileNotFoundError:
+        messagebox.showwarning("File Not Found", f"File {FILE_PATH} not found. Creating a new file.")
+        save_contacts_to_json(contacts)  # Create the file if it doesn't exist
+    except IOError as e:
+        messagebox.showerror("Error", f"Unable to load contacts: {e}")
+    return contacts
+
+def print_contacts():
+    contacts = load_contacts_from_json()
+    if contacts:
+        contact_list.delete(0, tk.END)  # Clear existing list
+        for contact in contacts:
+            if isinstance(contact, dict) and 'name' in contact and 'bio' in contact:
+                # Display contact information in the listbox
+                contact_info = f"Name: {contact['name']}, Bio: {contact['bio']}"
+                if 'power_of_attorney' in contact:
+                    contact_info += f", Power of Attorney: {'Yes' if contact['power_of_attorney'] else 'No'}"
+                if 'pets' in contact and contact['pets']:
+                    contact_info += f", Pets: {contact['pets']}"
+                if 'letter' in contact:
+                    contact_info += f"\nLetter to Loved Ones:\n{contact['letter']}"
+                if 'thoughts_on_death' in contact:
+                    contact_info += f"\nThoughts on Death:\n{contact['thoughts_on_death']}"
+                if 'final_words' in contact:
+                    contact_info += f"\nFinal Words:\n{contact['final_words']}"
+                contact_list.insert(tk.END, contact_info)
+            else:
+                print("Invalid contact format:", contact)
+    else:
+        contact_list.delete(0, tk.END)  # Clear existing list
+        contact_list.insert(tk.END, 'No contacts available.')
+
+def add_contact(name, bio, power_of_attorney, pets, letter, thoughts_on_death, final_words, root, add_contact_window):
+    # Pop-up for power of attorney
+    response_poa = messagebox.askquestion("Power of Attorney", "Do you have Power of Attorney?")
+    if response_poa == 'yes':
+        power_of_attorney = True
+    else:
+        power_of_attorney = False
+
+    # Pop-up for pets
+    response_pets = messagebox.askquestion("Pets", "Do you have any pets?")
+    if response_pets == 'yes':
+        has_pets = True
+    else:
+        has_pets = False
+
+    # Pop-up for thoughts on death
+    thoughts_on_death = simpledialog.askstring("Thoughts on Death", "Please write your thoughts on death:", parent=add_contact_window)
+
+    # Retrieve final words from the Text widget
+    final_words = final_words_entry.get("1.0", "end-1c")
+
+    contacts = load_contacts_from_json()
+    contacts.append({
+        'name': name,
+        'bio': bio,
+        'power_of_attorney': power_of_attorney,
+        'pets': pets if has_pets else None,  # Store pets only if user has them
+        'letter': letter.strip(),  # Save the letter content
+        'thoughts_on_death': thoughts_on_death.strip() if thoughts_on_death else None,  # Save thoughts on death
+        'final_words': final_words.strip() if final_words else None  # Save final words
+    })
+    save_contacts_to_json(contacts)
+    add_contact_window.destroy()  # Destroy the add contact window after saving
+    root.deiconify()  # Deiconify the main window
+    messagebox.showinfo('Success', 'Contact information saved successfully!')
+    print_contacts()  # Update the contact list immediately after adding a new contact
+
+def open_add_contact_window():
+    root.withdraw()  # Hide the main window temporarily
+    add_contact_window = tk.Toplevel(root)
+    add_contact_window.title('Add Contact')
+
+    # Function to handle saving contact information
+    def save_contact_info():
+        add_contact(name_entry.get(), bio_entry.get("1.0", "end-1c"), None, pets_entry.get(), letter_entry.get("1.0", "end-1c"), thoughts_on_death_entry.get("1.0", "end-1c"), None, root, add_contact_window)
+
+    # Write a Letter section
+    tk.Label(add_contact_window, text="Write a Letter to Loved Ones", font=('Arial', 14, 'bold')).pack(pady=10)
+    letter_entry = tk.Text(add_contact_window, height=10, width=50)
+    letter_entry.pack(pady=5)
+
+    # Thoughts on Death section
+    tk.Label(add_contact_window, text="Thoughts on Death", font=('Arial', 14, 'bold')).pack(pady=10)
+    thoughts_on_death_entry = tk.Text(add_contact_window, height=5, width=50)
+    thoughts_on_death_entry.pack(pady=5)
+
+    # Final Words section
+    tk.Label(add_contact_window, text='Final Words:', font=('Arial', 14)).pack(pady=10)
+    global final_words_entry
+    final_words_entry = tk.Text(add_contact_window, height=5, width=50)
+    final_words_entry.pack(pady=5)
+
+    # Contact Information section
+    tk.Label(add_contact_window, text='Name:').pack(pady=10)
+    name_entry = tk.Entry(add_contact_window)
+    name_entry.pack(pady=5)
+
+    tk.Label(add_contact_window, text='Bio:').pack(pady=10)
+    bio_entry = tk.Text(add_contact_window, height=5, width=50)
+    bio_entry.pack(pady=5)
+
+    tk.Label(add_contact_window, text='Pets:').pack(pady=10)
+    pets_entry = tk.Entry(add_contact_window)
+    pets_entry.pack(pady=5)
+
+    # Save Button
+    save_button = tk.Button(add_contact_window, text='Save', command=save_contact_info)
+    save_button.pack(pady=10)
+
+    # Function to handle window close event
+    def on_close():
+        add_contact_window.destroy()
+        root.deiconify()
+
+    # Bind the window close event to on_close function
+    add_contact_window.protocol("WM_DELETE_WINDOW", on_close)
+
+def open_edit_contact_window():
+    selected_index = contact_list.curselection()  # Get index of selected contact
+    if not selected_index:
+        messagebox.showwarning("No Contact Selected", "Please select a contact to edit.")
+        return
+
+    try:
+        contacts = load_contacts_from_json()  # Load current contacts
+        selected_contact = contacts[selected_index[0]]  # Get selected contact from list
+    except IndexError:
+        messagebox.showerror("Error", "Invalid contact selection.")
+        return
+
+    # Create a new window for editing
+    edit_contact_window = tk.Toplevel(root)
+    edit_contact_window.title('Edit Contact')
+
+    # Function to handle saving edited contact information
+    def save_edited_contact():
+        try:
+            contacts = load_contacts_from_json()  # Load current contacts
+            contacts[selected_index[0]] = {
+                'name': name_entry.get(),
+                'bio': bio_entry.get("1.0", "end-1c"),
+                'power_of_attorney': power_of_attorney_var.get(),
+                'pets': pets_entry.get(),
+                'letter': letter_entry.get("1.0", "end-1c"),
+                'thoughts_on_death': thoughts_on_death_entry.get("1.0", "end-1c"),
+                'final_words': final_words_entry.get("1.0", "end-1c")
+            }
+            save_contacts_to_json(contacts)
+            edit_contact_window.destroy()
+            root.deiconify()
+            messagebox.showinfo('Success', 'Contact information updated successfully!')
+            print_contacts()
+        except IndexError:
+            messagebox.showerror("Error", "Failed to update contact information.")
+
+    # Populate fields with existing contact details
+    name_entry = tk.Entry(edit_contact_window, textvariable=tk.StringVar(value=selected_contact['name']))
+    name_entry.pack(pady=5)
+
+    bio_entry = tk.Text(edit_contact_window, height=5, width=50)
+    bio_entry.insert(tk.END, selected_contact['bio'])
+    bio_entry.pack(pady=5)
+
+    power_of_attorney_var = tk.BooleanVar(value=selected_contact.get('power_of_attorney', False))
+    tk.Checkbutton(edit_contact_window, text='Power of Attorney', variable=power_of_attorney_var).pack(pady=5)
+
+    pets_entry = tk.Entry(edit_contact_window, textvariable=tk.StringVar(value=selected_contact.get('pets', '')))
+    pets_entry.pack(pady=5)
+
+    letter_entry = tk.Text(edit_contact_window, height=10, width=50)
+    letter_entry.insert(tk.END, selected_contact.get('letter', ''))
+    letter_entry.pack(pady=5)
+
+    thoughts_on_death_entry = tk.Text(edit_contact_window, height=5, width=50)
+    thoughts_on_death_entry.insert(tk.END, selected_contact.get('thoughts_on_death', ''))
+    thoughts_on_death_entry.pack(pady=5)
+
+    final_words_entry = tk.Text(edit_contact_window, height=5, width=50)
+    final_words_entry.insert(tk.END, selected_contact.get('final_words', ''))
+    final_words_entry.pack(pady=5)
+
+    # Save Button
+    save_button = tk.Button(edit_contact_window, text='Save', command=save_edited_contact)
+    save_button.pack(pady=10)
+
+    # Function to handle window close event
+    def on_close():
+        edit_contact_window.destroy()
+        root.deiconify()
+
+    edit_contact_window.protocol("WM_DELETE_WINDOW", on_close)
+
+def delete_all_contacts():
+    response = messagebox.askyesno("Delete All Contacts", "Are you sure you want to delete all contacts?")
+    if response:
+        global contacts
+        contacts = []  # Clear the contacts list
+        save_contacts_to_json(contacts)
+        print_contacts()  # Update the contact list display
+
+def main():
+    global root
+    root = tk.Tk()
+    root.title('Contact Management')
+
+    # Ensure the contacts file exists and load initial contacts
+    if not os.path.exists(FILE_PATH):
+        with open(FILE_PATH, 'w') as f:
+            json.dump([], f)
+
+    global contacts
+    contacts = load_contacts_from_json()
+
+    # Frame to hold the listbox and buttons
+    frame = tk.Frame(root)
+    frame.pack(padx=20, pady=20)
+
+    # Listbox to display contacts
+    global contact_list
+    contact_list = tk.Listbox(frame, width=80, height=10, font=('Arial', 12))
+    contact_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    # Scrollbar for the listbox
+    scrollbar = tk.Scrollbar(frame, orient=tk.VERTICAL)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    contact_list.config(yscrollcommand=scrollbar.set)
+    scrollbar.config(command=contact_list.yview)
+
+    # Button to print contacts
+    print_button = tk.Button(root, text='Print Contacts', command=print_contacts, font=('Arial', 16))
+    print_button.pack(pady=10)
+
+    # Button to add contact
+    add_contact_button = tk.Button(root, text='Add Contact', command=open_add_contact_window, font=('Arial', 16), bg='green', fg='white')
+    add_contact_button.pack(pady=10)
+
+    # Button to edit contact
+    edit_contact_button = tk.Button(root, text='Edit Contact', command=open_edit_contact_window, font=('Arial', 16), bg='blue', fg='white')
+    edit_contact_button.pack(pady=10)
+
+    # Button to delete all contacts
+    delete_all_button = tk.Button(root, text='Delete All Contacts', command=delete_all_contacts, font=('Arial', 16), bg='red', fg='white')
+    delete_all_button.pack(pady=10)
+
+    # Button to quit the application
+    quit_button = tk.Button(root, text='Quit', command=root.quit, font=('Arial', 16))
+    quit_button.pack(pady=10)
+
+    # Initialize contact list display
+    print_contacts()
+
+    # Start the GUI main loop
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
