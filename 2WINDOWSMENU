@@ -1,0 +1,241 @@
+import os
+import pygame
+from urllib.parse import unquote
+import random
+import difflib
+import threading
+import time
+
+class MusicPlayer:
+    def __init__(self):
+        pygame.init()
+        pygame.mixer.init()
+        self.playlist = []
+        self.current_index = 0
+        self.paused = False
+        self.running = True
+        self.track_finished = threading.Event()
+        self.input_thread = None
+
+    def load_playlist(self, playlist_path):
+        try:
+            if not os.path.isfile(playlist_path):
+                print(f"Error: Playlist file '{playlist_path}' not found.")
+                return False
+            
+            self.stop()  # Stop current playback
+            self.playlist.clear()  # Clear current playlist
+            self.current_index = 0  # Reset current index
+
+            with open(playlist_path, 'r') as f:
+                lines = f.readlines()
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('#EXTM3U') or line.startswith('#EXTINF'):
+                        continue  # Skip metadata lines
+                    elif line.startswith('file://'):
+                        # Replace 'file://' and decode URL-encoded path
+                        media_path = line.replace('file://', '')
+                        media_path = unquote(media_path)  # Decode URL-encoded paths
+
+                        # On Windows, replace '/' with '\\' in path and remove leading '/'
+                        media_path = media_path.lstrip('/').replace('/', '\\')
+
+                        if os.path.exists(media_path):
+                            self.playlist.append(media_path)
+                        else:
+                            print(f"Skipping unknown or inaccessible file: {media_path}")
+                    else:
+                        print(f"Skipping unrecognized entry in playlist: {line}")
+
+            print(f"Playlist '{os.path.basename(playlist_path)}' loaded successfully.")
+            self.append_to_history(playlist_path)  # Append to history after successful load
+            return True
+
+        except Exception as e:
+            print(f"Error occurred while loading playlist '{playlist_path}': {e}")
+            return False
+
+    def play(self):
+        if not self.playlist:
+            print("Playlist is empty. Load a playlist first.")
+            return
+
+        if self.paused:
+            pygame.mixer.music.unpause()
+            self.paused = False
+        else:
+            pygame.mixer.music.load(self.playlist[self.current_index])
+            pygame.mixer.music.play()
+            print(f"Now playing: {os.path.basename(self.playlist[self.current_index])}")
+
+    def pause(self):
+        if pygame.mixer.music.get_busy() and not self.paused:
+            pygame.mixer.music.pause()
+            self.paused = True
+            print("Music paused.")
+        else:
+            print("No music is currently playing or already paused.")
+
+    def stop(self):
+        pygame.mixer.music.stop()
+
+    def next_track(self):
+        self.current_index += 1
+        if self.current_index < len(self.playlist):
+            self.play()
+        else:
+            print("End of playlist reached.")
+            self.current_index = 0  # Loop back to start
+
+    def previous_track(self):
+        self.current_index -= 1
+        if self.current_index >= 0:
+            self.play()
+        else:
+            print("Beginning of playlist reached.")
+            self.current_index = 0  # Stay at beginning
+
+    def random_playlist(self, playlist_file):
+        try:
+            # Read all lines from the specified playlist file
+            with open(playlist_file, 'r') as f:
+                playlist_files = [line.strip() for line in f.readlines()]
+
+            # Filter out empty lines and non-existing playlists
+            playlist_files = [file for file in playlist_files if os.path.isfile(file)]
+
+            if not playlist_files:
+                print(f"No valid playlists found in {playlist_file}.")
+                return False
+
+            # Randomly select a playlist file
+            random_playlist = random.choice(playlist_files)
+
+            # Load the selected playlist
+            if self.load_playlist(random_playlist):
+                # Start playing the first track in the loaded playlist
+                self.play()
+                return True
+
+        except FileNotFoundError:
+            print(f"Error: {playlist_file} not found.")
+        except Exception as e:
+            print(f"Error occurred while processing {playlist_file}: {e}")
+
+        return False
+
+    def fuzzy_search_and_play(self, query):
+        playlist_dir = "C:\\Users\\coffe"  # Directory containing playlists
+        similar_playlists = self.fuzzy_search_files(query, playlist_dir)
+        
+        if not similar_playlists:
+            print("No similar playlists found.")
+        else:
+            for playlist in similar_playlists:
+                playlist_path = os.path.join(playlist_dir, playlist)
+                if os.path.exists(playlist_path):
+                    if self.load_playlist(playlist_path):
+                        self.play()
+                        break  # Play the first valid playlist found
+                else:
+                    print(f"Playlist file not found: {playlist_path}")
+
+    def fuzzy_search_files(self, query, directory):
+        if not os.path.isdir(directory):
+            return []
+        
+        files = [f for f in os.listdir(directory) if f.endswith(".m3u")]
+        matches = difflib.get_close_matches(query, files, n=5, cutoff=0.6)
+        return matches
+
+    def append_to_history(self, playlist_path):
+        history_file = "C:\\Users\\coffe\\history3333.m3u"  # Adjust the file path accordingly
+
+        try:
+            # Check if the playlist_path is already in history before appending
+            with open(history_file, 'a+') as f:
+                f.seek(0)
+                if playlist_path not in f.read():
+                    f.write(f"{playlist_path}\n")
+                    print(f"Added '{playlist_path}' to history.")
+                else:
+                    print(f"'{playlist_path}' is already in history.")
+
+        except IOError as e:
+            print(f"Error writing to history file '{history_file}': {e}")
+
+    def load_from_history(self):
+        history_file = "C:\\Users\\coffe\\history3333.m3u"  # Adjust the file path accordingly
+
+        try:
+            with open(history_file, 'r') as f:
+                history_entries = [line.strip() for line in f.readlines()]
+
+            if not history_entries:
+                print("History is empty.")
+                return False
+
+            # Randomly select a playlist file from history
+            random_playlist = random.choice(history_entries)
+
+            if self.load_playlist(random_playlist):
+                # Start playing the first track in the loaded playlist
+                self.play()
+                return True
+
+        except FileNotFoundError:
+            print(f"Error: {history_file} not found.")
+        except Exception as e:
+            print(f"Error occurred while loading history file '{history_file}': {e}")
+
+        return False
+
+    def quit(self):
+        pygame.quit()
+        self.running = False
+
+    def handle_input(self):
+        while self.running:
+            command = input("Enter command (play / pause / next / previous / stop / random / quit / <playlist_path>): ").strip().lower()
+
+            if command == "play":
+                self.play()
+            elif command == "pause":
+                self.pause()
+            elif command == "next":
+                self.next_track()
+            elif command == "previous":
+                self.previous_track()
+            elif command == "stop":
+                self.stop()
+            elif command == "random":
+                self.random_playlist("C:\\Users\\coffe\\history3333.m3u")  # Replace with your random playlist file
+            elif command == "quit":
+                self.quit()
+            else:
+                # Assume it's a new playlist name or path
+                self.fuzzy_search_and_play(command)
+
+    def track_finished_event(self):
+        while self.running:
+            if pygame.mixer.music.get_busy() == 0 and not self.paused:
+                self.track_finished.set()
+            time.sleep(1)
+
+    def run(self):
+        self.input_thread = threading.Thread(target=self.handle_input)
+        self.input_thread.start()
+
+        track_checker_thread = threading.Thread(target=self.track_finished_event)
+        track_checker_thread.start()
+
+        while self.running:
+            if self.track_finished.is_set():
+                self.next_track()
+                self.track_finished.clear()
+            time.sleep(1)
+
+if __name__ == "__main__":
+    player = MusicPlayer()
+    player.run()
