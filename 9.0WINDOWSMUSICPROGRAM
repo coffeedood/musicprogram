@@ -1,0 +1,463 @@
+import os
+import urllib.parse
+import tkinter as tk
+from tkinter import filedialog, messagebox, scrolledtext
+import pygame
+from fuzzywuzzy import fuzz, process  # Added import for fuzzy matching
+from threading import Thread  # Added import for threading
+from natsort import natsorted
+import random
+
+MAX_FILENAME_LENGTH = 245  # Maximum length for playlist filenames
+
+class MusicPlayer:
+    def __init__(self):
+        self.playlist = []
+        self.current_index = 0
+        self.playlist_folder = ""  # Added attribute to store playlist folder path
+        self.paused = False  # Flag to track if music is paused
+        self.running = True  # Flag to indicate if the player is running
+        self.volume = 0.5  # Initial volume setting (0.0 to 1.0)
+
+    def load_playlist(self, playlist_path):
+        try:
+            if not os.path.isfile(playlist_path):
+                print(f"Error: Playlist file '{playlist_path}' not found.")
+                return False
+
+            self.stop()  # Stop current playing
+            self.playlist.clear()  # Clear current playlist
+            self.current_index = 0  # Reset current index
+
+            with open(playlist_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('#EXTM3U') or line.startswith('#EXTINF'):
+                        continue  # Skip m3u header and info lines
+                    elif line.startswith('# Song:'):
+                        continue  # Skip specific comment lines
+                    elif line.startswith('file://'):
+                        media_path = line.replace('file:///', '')
+                        media_path = urllib.parse.unquote(media_path)  # Decode URL encoding
+                        if os.path.exists(media_path):
+                            self.playlist.append(media_path)
+                        else:
+                            print(f"Skipping unknown or inaccessible file: {media_path}")
+                    else:
+                        print(f"Skipping unrecognized entry in playlist: {line}")
+
+            if self.playlist:
+                print(f"Playlist '{os.path.basename(playlist_path)}' loaded successfully.")
+                self.play()
+                return True
+            else:
+                print(f"No valid media files found in playlist '{os.path.basename(playlist_path)}'.")
+                return False
+
+        except Exception as e:
+            print(f"Error occurred while loading playlist '{playlist_path}': {e}")
+            return False
+
+    def play(self):
+        if not self.playlist:
+            print("Playlist is empty. Load a playlist first.")
+            return
+
+        if self.paused:
+            pygame.mixer.music.unpause()
+            self.paused = False
+            print(f"Resumed playing: {os.path.basename(self.playlist[self.current_index])}")
+        else:
+            pygame.mixer.music.load(self.playlist[self.current_index])
+            pygame.mixer.music.set_volume(self.volume)  # Set initial volume
+            pygame.mixer.music.play()
+            print(f"Now playing: {os.path.basename(self.playlist[self.current_index])}")
+
+    def pause(self):
+        if pygame.mixer.music.get_busy():
+            pygame.mixer.music.pause()
+            self.paused = True
+            print("Music paused.")
+
+    def stop(self):
+        pygame.mixer.music.stop()
+        self.paused = False
+        print("Music stopped.")
+
+    def next_track(self):
+        if not self.playlist:
+            print("Playlist is empty. Load a playlist first.")
+            return
+
+        self.current_index = (self.current_index + 1) % len(self.playlist)
+        self.play()
+        return self.playlist[self.current_index]
+
+    def previous_track(self):
+        if not self.playlist:
+            print("Playlist is empty. Load a playlist first.")
+            return
+
+        self.current_index = (self.current_index - 1) % len(self.playlist)
+        self.play()
+        return self.playlist[self.current_index]
+
+    def track_finished_event(self):
+        while self.running:
+            if pygame.mixer.music.get_busy() == 0 and not self.paused:
+                self.next_track()
+            pygame.time.wait(1000)  # Wait for 1 second between checks
+
+    def quit(self):
+        self.running = False
+
+    def set_volume(self, volume):
+        self.volume = volume
+        if pygame.mixer.music.get_busy():
+            pygame.mixer.music.set_volume(self.volume)
+            print(f"Volume set to: {self.volume:.1f}")
+
+    def get_volume(self):
+        return self.volume
+
+    def create_artist_playlists_from_folder(self, music_source_dir, playlist_dest_dir):
+        try:
+            if not os.path.exists(music_source_dir) or not os.path.isdir(music_source_dir):
+                messagebox.showerror("Error", f"Music source directory '{music_source_dir}' not found.")
+                return False
+
+            if not os.path.exists(playlist_dest_dir):
+                os.makedirs(playlist_dest_dir)
+
+            for root, dirs, files in os.walk(music_source_dir):
+                songs = [file for file in files if file.lower().endswith(('.mp3', '.wav', '.aif', '.aiff')) and not file.startswith('._')]
+                if songs:
+                    artist_name = os.path.basename(os.path.dirname(root))
+
+                    songs = natsorted(songs)
+
+                    playlist_title = f'{artist_name}'
+                    playlist_name = self.sanitize_playlist_name(playlist_title)
+                    playlist_name = playlist_name[:MAX_FILENAME_LENGTH - len('.m3u')]
+
+                    song_playlist_path = os.path.join(playlist_dest_dir, f'{playlist_name}.m3u')
+                    with open(song_playlist_path, 'w', encoding='utf-8') as song_playlist_file:
+                        for song in songs:
+                            title = os.path.splitext(song)[0]
+                            encoded_path = urllib.parse.quote(os.path.abspath(os.path.join(root, song)))
+                            song_playlist_file.write(f'# Song: {title}\n')
+                            song_playlist_file.write(f'file:///{encoded_path}\n')
+
+            messagebox.showinfo("Success", f"Artist playlists created successfully in '{playlist_dest_dir}'.")
+            return True
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Error occurred while creating artist playlists: {e}")
+            return False
+
+    def create_album_playlists_from_folder(self, music_source_dir, playlist_dest_dir):
+        try:
+            if not os.path.exists(music_source_dir) or not os.path.isdir(music_source_dir):
+                messagebox.showerror("Error", f"Music source directory '{music_source_dir}' not found.")
+                return False
+
+            if not os.path.exists(playlist_dest_dir):
+                os.makedirs(playlist_dest_dir)
+
+            for root, dirs, files in os.walk(music_source_dir):
+                songs = [file for file in files if file.lower().endswith(('.mp3', '.wav', '.aif', '.aiff', '.ifo', '.mp4', '.mkv')) and not file.startswith('._')]
+                if songs:
+                    artist_name = os.path.basename(os.path.dirname(root))
+                    album_name = os.path.basename(root)
+
+                    songs = natsorted(songs)
+
+                    playlist_title = f'{album_name} {artist_name}'
+                    playlist_name = self.sanitize_playlist_name(playlist_title)
+                    playlist_name = playlist_name[:MAX_FILENAME_LENGTH - len('.m3u')]
+
+                    song_playlist_path = os.path.join(playlist_dest_dir, f'{playlist_name}.m3u')
+                    with open(song_playlist_path, 'w', encoding='utf-8') as song_playlist_file:
+                        for song in songs:
+                            title = os.path.splitext(song)[0]
+                            encoded_path = urllib.parse.quote(os.path.abspath(os.path.join(root, song)))
+                            song_playlist_file.write(f'# Song: {title}\n')
+                            song_playlist_file.write(f'file:///{encoded_path}\n')
+
+            messagebox.showinfo("Success", f"Album playlists created successfully in '{playlist_dest_dir}'.")
+            return True
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Error occurred while creating album playlists: {e}")
+            return False
+
+    def create_song_playlists_from_folder(self, music_source_dir, playlist_dest_dir):
+        try:
+            if not os.path.exists(music_source_dir) or not os.path.isdir(music_source_dir):
+                messagebox.showerror("Error", f"Music source directory '{music_source_dir}' not found.")
+                return False
+
+            if not os.path.exists(playlist_dest_dir):
+                os.makedirs(playlist_dest_dir)
+
+            for root, dirs, files in os.walk(music_source_dir):
+                songs = [file for file in files if file.lower().endswith(('.mp3', '.wav', '.aif', '.aiff')) and not file.startswith('._')]
+                if songs:
+                    songs = natsorted(songs)
+
+                    for song in songs:
+                        title = os.path.splitext(song)[0]
+                        song_playlist_path = os.path.join(playlist_dest_dir, f'{self.sanitize_playlist_name(title)}.m3u')
+                        with open(song_playlist_path, 'w', encoding='utf-8') as song_playlist_file:
+                            encoded_path = urllib.parse.quote(os.path.abspath(os.path.join(root, song)))
+                            song_playlist_file.write(f'# Song: {title}\n')
+                            song_playlist_file.write(f'file:///{encoded_path}\n')
+
+            messagebox.showinfo("Success", f"Song playlists created successfully in '{playlist_dest_dir}'.")
+            return True
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Error occurred while creating song playlists: {e}")
+            return False
+
+    def sanitize_playlist_name(self, name):
+        return name.replace("'", '').lower()
+
+    def write_to_history_playlist(self, playlist_folder, playlist_title):
+        try:
+            history_path = os.path.join(playlist_folder, "history.m3u")
+            with open(history_path, 'a', encoding='utf-8') as history_file:
+                history_file.write(f'# Playlist: {playlist_title}\n')
+        except Exception as e:
+            print(f"Error occurred while writing to history playlist: {e}")
+
+    def play_random_from_history(self, playlist_folder):
+        try:
+            history_path = os.path.join(playlist_folder, "history.m3u")
+            if os.path.exists(history_path):
+                with open(history_path, 'r', encoding='utf-8') as history_file:
+                    history_lines = history_file.readlines()
+                    if history_lines:
+                        random_line = random.choice(history_lines).strip()
+                        if random_line.startswith('# Playlist:'):
+                            playlist_title = random_line.split(': ', 1)[1]
+                            print(f"Playing random track from playlist: {playlist_title}")
+                            playlist_name = self.sanitize_playlist_name(playlist_title)
+                            playlist_path = os.path.join(playlist_folder, f"{playlist_name}.m3u")
+                            if os.path.exists(playlist_path):
+                                if self.load_playlist(playlist_path):
+                                    self.play()
+                                else:
+                                    print(f"Failed to load playlist: {playlist_title}")
+                            else:
+                                print(f"Playlist '{playlist_title}' not found.")
+                        else:
+                            print("Invalid line in history playlist.")
+                    else:
+                        print("History playlist is empty.")
+            else:
+                print("History playlist not found.")
+
+        except Exception as e:
+            print(f"Error occurred while playing random track from history playlist: {e}")
+
+
+class MusicPlayerGUI(tk.Tk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("Music Player")
+        self.geometry("600x600")
+
+        self.player = MusicPlayer()
+
+        self.label_playlist_name = tk.Label(self, text="Load Playlist by Name:")
+        self.label_playlist_name.pack(pady=10)
+
+        self.entry_playlist_name = tk.Entry(self, width=50)
+        self.entry_playlist_name.pack(pady=5)
+        self.entry_playlist_name.bind("<Return>", self.load_playlist_enter)  # Bind Enter key event
+
+        self.select_playlist_folder_button = tk.Button(self, text="Select Playlist Folder", command=self.select_playlist_folder)
+        self.select_playlist_folder_button.pack(pady=5)
+
+        self.load_playlist_button = tk.Button(self, text="Load Playlist", command=self.load_playlist)
+        self.load_playlist_button.pack(pady=10)
+
+        self.label_create_playlist = tk.Label(self, text="Create Playlist:")
+        self.label_create_playlist.pack(pady=10)
+
+        self.create_artist_playlist_button = tk.Button(self, text="Create Artist Playlists from Folder", command=self.create_artist_playlists)
+        self.create_artist_playlist_button.pack(pady=5)
+
+        self.create_album_playlist_button = tk.Button(self, text="Create Album Playlists from Folder", command=self.create_album_playlists)
+        self.create_album_playlist_button.pack(pady=5)
+
+        self.create_song_playlist_button = tk.Button(self, text="Create Song Playlists from Folder", command=self.create_song_playlists)
+        self.create_song_playlist_button.pack(pady=5)
+
+        self.create_all_playlists_button = tk.Button(self, text="Create All Playlists", command=self.create_all_playlists)
+        self.create_all_playlists_button.pack(pady=5)
+
+        self.entry_command = tk.Entry(self, width=30)
+        self.entry_command.pack(pady=5)
+        self.entry_command.bind("<Return>", self.handle_enter_key)
+
+        self.play_button = tk.Button(self, text="Play", command=self.player.play)
+        self.play_button.pack(pady=5)
+
+        self.pause_button = tk.Button(self, text="Pause", command=self.player.pause)
+        self.pause_button.pack(pady=5)
+
+        self.stop_button = tk.Button(self, text="Stop", command=self.player.stop)
+        self.stop_button.pack(pady=5)
+
+        self.next_button = tk.Button(self, text="Next Track", command=self.next_track)
+        self.next_button.pack(pady=5)
+
+        self.previous_button = tk.Button(self, text="Previous Track", command=self.previous_track)
+        self.previous_button.pack(pady=5)
+
+        self.volume_label = tk.Label(self, text="Volume (0.0 to 1.0):")
+        self.volume_label.pack(pady=5)
+
+        self.scale_volume = tk.Scale(self, from_=0.0, to=1.0, resolution=0.1, orient=tk.HORIZONTAL, command=self.set_volume)
+        self.scale_volume.set(self.player.get_volume())  # Set initial volume
+        self.scale_volume.pack(pady=5)
+
+        self.text_log = scrolledtext.ScrolledText(self, width=60, height=10, wrap=tk.WORD)
+        self.text_log.pack(pady=10)
+
+        self.text_widget = scrolledtext.ScrolledText(self, wrap="word", width=60, height=10)
+        self.text_widget.pack(pady=20)
+
+        pygame.init()  # Initialize pygame for music playback
+        self.track_finished_thread = Thread(target=self.player.track_finished_event)
+        self.track_finished_thread.start()  # Start the track finished event thread
+
+        self.protocol("WM_DELETE_WINDOW", self.on_close)  # Handle window close event
+
+    def on_close(self):
+        self.player.quit()  # Stop the track finished event thread
+        pygame.quit()  # Quit pygame
+        self.destroy()
+
+    def load_playlist_enter(self, event=None):
+        playlist_name_input = self.entry_playlist_name.get().strip()
+        if not playlist_name_input:
+            messagebox.showwarning("Warning", "Please enter a playlist name.")
+            return
+
+        if not self.player.playlist_folder:
+            messagebox.showerror("Error", "Playlist folder not selected.")
+            return
+
+        playlists_in_folder = [f.replace(".m3u", "") for f in os.listdir(self.player.playlist_folder) if f.endswith(".m3u")]
+        match = process.extractOne(playlist_name_input, playlists_in_folder, scorer=fuzz.ratio)
+
+        if match and match[1] >= 80:  # Adjust the threshold as needed
+            playlist_name = match[0]
+            playlist_path = os.path.join(self.player.playlist_folder, f"{playlist_name}.m3u")
+
+            if os.path.exists(playlist_path):
+                if self.player.load_playlist(playlist_path):
+                    messagebox.showinfo("Success", f"Playlist '{playlist_name}' loaded successfully.")
+                    self.text_widget.insert("end", f"Playlist loaded: {playlist_path}\n")
+                    self.player.write_to_history_playlist(self.player.playlist_folder, playlist_name)
+                else:
+                    messagebox.showerror("Error", f"Failed to load playlist '{playlist_name}'.")
+            else:
+                messagebox.showerror("Error", f"Playlist '{playlist_name}' not found.")
+        else:
+            messagebox.showerror("Error", "No matching playlist found.")
+
+        self.entry_playlist_name.delete(0, 'end')
+
+    def handle_enter_key(self, event):
+        command = self.entry_command.get().strip().lower()
+
+        if command == "next":
+            next_song = self.player.next_track()
+            if next_song:
+                self.text_widget.insert(tk.END, f"Skipped to next track: {os.path.basename(next_song)}\n")
+                self.player.play()
+            else:
+                self.text_widget.insert(tk.END, "Failed to skip to next track. Playlist may be empty.\n")
+
+        elif command == "previous":
+            previous_song = self.player.previous_track()
+            if previous_song:
+                self.text_widget.insert(tk.END, f"Returned to previous track: {os.path.basename(previous_song)}\n")
+                self.player.play()
+            else:
+                self.text_widget.insert(tk.END, "Failed to return to previous track. Playlist may be empty.\n")
+
+        elif command == "random":
+            self.player.play_random_from_history(self.player.playlist_folder)
+
+        else:
+            self.text_widget.insert(tk.END, "Invalid command. Please enter 'next', 'previous', or 'random'.\n")
+
+        self.entry_command.delete(0, tk.END)
+
+    def select_playlist_folder(self):
+        self.player.playlist_folder = filedialog.askdirectory()
+        self.text_widget.insert("end", f"Selected playlist folder: {self.player.playlist_folder}\n")
+
+    def load_playlist(self):
+        playlist_path = filedialog.askopenfilename(initialdir="/", title="Select Playlist",
+                                                   filetypes=(("M3U files", "*.m3u"), ("all files", "*.*")))
+        if playlist_path:
+            if self.player.load_playlist(playlist_path):
+                self.text_widget.insert("end", f"Playlist loaded: {playlist_path}\n")
+                self.player.write_to_history_playlist(os.path.dirname(playlist_path), os.path.basename(playlist_path))
+            else:
+                self.text_widget.insert("end", f"Failed to load playlist: {playlist_path}\n")
+
+    def create_artist_playlists(self):
+        music_source_dir = filedialog.askdirectory(initialdir="/", title="Select Music Source Directory")
+        if music_source_dir:
+            playlist_dest_dir = filedialog.askdirectory(initialdir="/", title="Select Destination Directory for Playlists")
+            if playlist_dest_dir:
+                self.player.create_artist_playlists_from_folder(music_source_dir, playlist_dest_dir)
+
+    def create_album_playlists(self):
+        music_source_dir = filedialog.askdirectory(initialdir="/", title="Select Music Source Directory")
+        if music_source_dir:
+            playlist_dest_dir = filedialog.askdirectory(initialdir="/", title="Select Destination Directory for Playlists")
+            if playlist_dest_dir:
+                self.player.create_album_playlists_from_folder(music_source_dir, playlist_dest_dir)
+
+    def create_song_playlists(self):
+        music_source_dir = filedialog.askdirectory(initialdir="/", title="Select Music Source Directory")
+        if music_source_dir:
+            playlist_dest_dir = filedialog.askdirectory(initialdir="/", title="Select Destination Directory for Playlists")
+            if playlist_dest_dir:
+                self.player.create_song_playlists_from_folder(music_source_dir, playlist_dest_dir)
+
+    def create_all_playlists(self):
+        music_source_dir = filedialog.askdirectory(initialdir="/", title="Select Music Source Directory")
+        if music_source_dir:
+            playlist_dest_dir = filedialog.askdirectory(initialdir="/", title="Select Destination Directory for Playlists")
+            if playlist_dest_dir:
+                self.player.create_artist_playlists_from_folder(music_source_dir, playlist_dest_dir)
+                self.player.create_album_playlists_from_folder(music_source_dir, playlist_dest_dir)
+                self.player.create_song_playlists_from_folder(music_source_dir, playlist_dest_dir)
+
+    def next_track(self):
+        self.player.next_track()
+        self.text_widget.insert(tk.END, f"Next Track: {os.path.basename(self.player.playlist[self.player.current_index])}\n")
+
+    def previous_track(self):
+        self.player.previous_track()
+        self.text_widget.insert(tk.END, f"Previous Track: {os.path.basename(self.player.playlist[self.player.current_index])}\n")
+
+    def set_volume(self, volume):
+        self.player.set_volume(float(volume))
+        self.text_widget.insert(tk.END, f"Volume set to {volume}\n")
+
+
+if __name__ == "__main__":
+    app = MusicPlayerGUI()
+    app.mainloop()
