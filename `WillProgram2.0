@@ -1,0 +1,322 @@
+import tkinter as tk
+from tkinter import messagebox, filedialog
+import json
+import os
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+
+# File paths
+PROFILES_FILE = os.path.expanduser('~/profiles.json')
+
+def save_to_json(data, file_path):
+    try:
+        with open(file_path, 'w') as f:
+            json.dump(data, f, indent=4)
+    except IOError as e:
+        messagebox.showerror("Error", f"Unable to save data: {e}")
+
+def load_from_json(file_path):
+    data = []
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        messagebox.showwarning("File Not Found", f"File {file_path} not found.")
+    except IOError as e:
+        messagebox.showerror("Error", f"Unable to load data: {e}")
+    return data
+
+def create_profile_window(root):
+    def create_profile():
+        # Collect answers from entry fields
+        first_name = first_name_entry.get()
+        last_name = last_name_entry.get()
+        birthday = birthday_entry.get()
+        bio_info = bio_info_entry.get("1.0", "end-1c")  # Retrieve text from a Text widget
+        employment_info = employment_info_entry.get("1.0", "end-1c")
+        banking_info = banking_info_entry.get("1.0", "end-1c")
+        documents_info = documents_info_entry.get("1.0", "end-1c")
+
+        # Validate if required fields are not empty
+        if first_name.strip() == "" or last_name.strip() == "":
+            messagebox.showwarning("Warning", "First Name and Last Name cannot be empty!")
+            return
+
+        # Create profile dictionary
+        profile_data = {
+            'name': f"{first_name} {last_name}",
+            'first_name': first_name,
+            'last_name': last_name,
+            'birthday': birthday,
+            'bio_info': bio_info,
+            'employment_info': employment_info,
+            'banking_info': banking_info,
+            'documents_info': documents_info,
+            'contacts': []  # Ensure 'contacts' key is initialized
+        }
+
+        # Append new profile to profiles list
+        profiles.append(profile_data)
+
+        # Save profiles to JSON file
+        save_to_json(profiles, PROFILES_FILE)
+
+        # Display success message
+        messagebox.showinfo("Success", f"Profile '{first_name} {last_name}' created successfully!")
+
+        # Update profiles listbox with new profile
+        profiles_listbox.insert(tk.END, f"{first_name} {last_name}")
+
+    # Create the profile creation window
+    profile_window = tk.Toplevel(root)
+    profile_window.title("Create Profile")
+
+    # First Name
+    tk.Label(profile_window, text="First Name:").pack(pady=5)
+    first_name_entry = tk.Entry(profile_window)
+    first_name_entry.pack(pady=5)
+
+    # Last Name
+    tk.Label(profile_window, text="Last Name:").pack(pady=5)
+    last_name_entry = tk.Entry(profile_window)
+    last_name_entry.pack(pady=5)
+
+    # Birthday
+    tk.Label(profile_window, text="Birthday:").pack(pady=5)
+    birthday_entry = tk.Entry(profile_window)
+    birthday_entry.pack(pady=5)
+
+    # Bio Info
+    tk.Label(profile_window, text="Bio Info:").pack(pady=5)
+    bio_info_entry = tk.Text(profile_window, height=5, width=50)
+    bio_info_entry.pack(pady=5)
+
+    # Employment Info
+    tk.Label(profile_window, text="Employment Info:").pack(pady=5)
+    employment_info_entry = tk.Text(profile_window, height=5, width=50)
+    employment_info_entry.pack(pady=5)
+
+    # Banking Info
+    tk.Label(profile_window, text="Banking Info:").pack(pady=5)
+    banking_info_entry = tk.Text(profile_window, height=5, width=50)
+    banking_info_entry.pack(pady=5)
+
+    # Documents Info
+    tk.Label(profile_window, text="Documents Info:").pack(pady=5)
+    documents_info_entry = tk.Text(profile_window, height=5, width=50)
+    documents_info_entry.pack(pady=5)
+
+    # Create Profile Button
+    tk.Button(profile_window, text="Create Profile", command=create_profile).pack(pady=20)
+
+def print_profiles():
+    profiles_listbox.delete(0, tk.END)
+    for profile in profiles:
+        if isinstance(profile, dict) and 'name' in profile:
+            profiles_listbox.insert(tk.END, profile['name'])
+        else:
+            print("Invalid profile format:", profile)
+
+def delete_profile_window():
+    selected_index = profiles_listbox.curselection()
+    if selected_index:
+        selected_profile_name = profiles_listbox.get(selected_index[0])
+        result = messagebox.askyesno("Delete Profile", f"Are you sure you want to delete '{selected_profile_name}'?")
+        if result:
+            profiles_listbox.delete(selected_index)
+            # Remove the profile from the profiles list
+            for profile in profiles:
+                if isinstance(profile, dict) and profile.get('name') == selected_profile_name:
+                    profiles.remove(profile)
+                    break
+            # Save the updated profiles list to JSON file
+            save_to_json(profiles, PROFILES_FILE)
+            messagebox.showinfo("Success", f"Profile '{selected_profile_name}' deleted successfully.")
+    else:
+        messagebox.showwarning("No Profile Selected", "Please select a profile to delete.")
+
+def open_contact_window(profile_name):
+    profile = next((p for p in profiles if isinstance(p, dict) and p['name'] == profile_name), None)
+    if not profile:
+        messagebox.showwarning("Profile Not Found", f"Profile '{profile_name}' not found.")
+        return
+
+    contacts_window = tk.Toplevel()
+    contacts_window.title(f"Contacts for Profile: {profile_name}")
+
+    contact_list = tk.Listbox(contacts_window, width=50, height=20)
+    contact_list.pack(side=tk.LEFT, fill=tk.Y)
+
+    scrollbar = tk.Scrollbar(contacts_window)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    contact_list.configure(yscrollcommand=scrollbar.set)
+    scrollbar.configure(command=contact_list.yview)
+
+    def print_contacts():
+        contact_list.delete(0, tk.END)
+        for contact in profile.get('contacts', []):
+            contact_info = f"Name: {contact['name']}, Email: {contact.get('email', '')}, Phone: {contact.get('phone', '')}"
+            contact_list.insert(tk.END, contact_info)
+
+    def add_contact():
+        add_contact_window = tk.Toplevel()
+        add_contact_window.title("Add Contact")
+
+        tk.Label(add_contact_window, text="Name:").pack(pady=10)
+        name_entry = tk.Entry(add_contact_window)
+        name_entry.pack()
+
+        tk.Label(add_contact_window, text="Email Address:").pack(pady=10)
+        email_entry = tk.Entry(add_contact_window)
+        email_entry.pack()
+
+        tk.Label(add_contact_window, text="Phone Number:").pack(pady=10)
+        phone_entry = tk.Entry(add_contact_window)
+        phone_entry.pack()
+
+        def save_contact():
+            if 'contacts' not in profile:
+                profile['contacts'] = []  # Initialize 'contacts' list if it doesn't exist
+            contact = {
+                'name': name_entry.get(),
+                'email': email_entry.get(),
+                'phone': phone_entry.get()
+            }
+            profile['contacts'].append(contact)
+            save_to_json(profiles, PROFILES_FILE)
+            messagebox.showinfo("Success", "Contact added successfully!")
+            print_contacts()  # Update the contacts listbox after adding a new contact
+            add_contact_window.destroy()
+
+        tk.Button(add_contact_window, text="Save Contact", command=save_contact).pack(pady=20)
+
+    def edit_contact():
+        selected_index = contact_list.curselection()
+        if selected_index:
+            selected_contact = profile['contacts'][selected_index[0]]
+            edit_contact_window = tk.Toplevel()
+            edit_contact_window.title("Edit Contact")
+
+            tk.Label(edit_contact_window, text="Name:").pack(pady=10)
+            name_entry_edit = tk.Entry(edit_contact_window)
+            name_entry_edit.insert(0, selected_contact['name'])
+            name_entry_edit.pack()
+
+            tk.Label(edit_contact_window, text="Email Address:").pack(pady=10)
+            email_entry_edit = tk.Entry(edit_contact_window)
+            email_entry_edit.insert(0, selected_contact.get('email', ''))
+            email_entry_edit.pack()
+
+            tk.Label(edit_contact_window, text="Phone Number:").pack(pady=10)
+            phone_entry_edit = tk.Entry(edit_contact_window)
+            phone_entry_edit.insert(0, selected_contact.get('phone', ''))
+            phone_entry_edit.pack()
+
+            def save_changes():
+                selected_contact['name'] = name_entry_edit.get()
+                selected_contact['email'] = email_entry_edit.get()
+                selected_contact['phone'] = phone_entry_edit.get()
+                save_to_json(profiles, PROFILES_FILE)
+                messagebox.showinfo("Success", "Contact updated successfully!")
+                print_contacts()  # Update the contacts listbox after editing a contact
+                edit_contact_window.destroy()
+
+            tk.Button(edit_contact_window, text="Save Changes", command=save_changes).pack(pady=20)
+        else:
+            messagebox.showwarning("No Contact Selected", "Please select a contact to edit.")
+
+    def generate_pdf():
+        pdf_filename = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF files", "*.pdf")])
+        if pdf_filename:
+            c = canvas.Canvas(pdf_filename, pagesize=letter)
+            c.drawString(100, 750, f"Profile Information for: {profile_name}")
+            y_position = 720
+            for key, value in profile.items():
+                if key == 'contacts':
+                    continue  # Skip printing contacts here
+                if isinstance(value, list) or isinstance(value, dict):
+                    value = json.dumps(value, indent=4)
+                profile_info = f"{key}: {value}"
+                c.drawString(100, y_position, profile_info)
+                y_position -= 20
+            c.save()
+            messagebox.showinfo("PDF Generated", f"PDF generated successfully at {pdf_filename}")
+
+    # Print contacts button
+    tk.Button(contacts_window, text="Print Contacts", command=print_contacts).pack(pady=20)
+
+    # Add contact button
+    tk.Button(contacts_window, text="Add Contact", command=add_contact).pack(pady=20)
+
+    # Edit contact button
+    tk.Button(contacts_window, text="Edit Contact", command=edit_contact).pack(pady=20)
+
+    # Generate PDF button
+    tk.Button(contacts_window, text="Generate PDF", command=generate_pdf).pack(pady=20)
+
+def open_profile_window():
+    selected_index = profiles_listbox.curselection()
+    if selected_index:
+        selected_profile_name = profiles_listbox.get(selected_index[0])
+        open_contact_window(selected_profile_name)
+    else:
+        messagebox.showwarning("No Profile Selected", "Please select a profile to view contacts.")
+
+# Main window
+root = tk.Tk()
+root.title("Profile Manager")
+
+# Load profiles from JSON file
+profiles = load_from_json(PROFILES_FILE)
+
+# Profiles listbox
+profiles_listbox = tk.Listbox(root, width=50, height=20)
+profiles_listbox.pack(pady=20)
+
+# Print Profiles Button
+tk.Button(root, text="Print Profiles", command=print_profiles).pack(pady=20)
+
+# Open Profile Button
+tk.Button(root, text="Open Contacts", command=open_profile_window).pack(pady=20)
+
+# Create Profile Button
+tk.Button(root, text="Create Profile", command=lambda: create_profile_window(root)).pack(pady=20)
+
+# Delete Profile Button
+tk.Button(root, text="Delete Profile", command=delete_profile_window).pack(pady=20)
+
+# Generate PDF Button (in Profile Manager window)
+def generate_pdf_for_selected_profile():
+    selected_index = profiles_listbox.curselection()
+    if selected_index:
+        selected_profile_name = profiles_listbox.get(selected_index[0])
+        profile = next((p for p in profiles if isinstance(p, dict) and p['name'] == selected_profile_name), None)
+        if profile:
+            pdf_filename = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF files", "*.pdf")])
+            if pdf_filename:
+                c = canvas.Canvas(pdf_filename, pagesize=letter)
+                c.drawString(100, 750, f"Profile Information for: {selected_profile_name}")
+                y_position = 720
+                for key, value in profile.items():
+                    if key == 'contacts':
+                        continue  # Skip printing contacts here
+                    if isinstance(value, list) or isinstance(value, dict):
+                        value = json.dumps(value, indent=4)
+                    profile_info = f"{key}: {value}"
+                    c.drawString(100, y_position, profile_info)
+                    y_position -= 20
+                c.save()
+                messagebox.showinfo("PDF Generated", f"PDF generated successfully at {pdf_filename}")
+        else:
+            messagebox.showwarning("Profile Not Found", f"Profile '{selected_profile_name}' not found.")
+    else:
+        messagebox.showwarning("No Profile Selected", "Please select a profile to generate PDF.")
+
+tk.Button(root, text="Generate PDF for Selected Profile", command=generate_pdf_for_selected_profile).pack(pady=20)
+
+# Initialize profiles listbox with existing profiles
+print_profiles()
+
+# Run the application
+root.mainloop()
