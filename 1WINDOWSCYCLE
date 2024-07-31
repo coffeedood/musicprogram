@@ -1,0 +1,244 @@
+import os
+import urllib.parse
+import tkinter as tk
+from tkinter import filedialog, scrolledtext, messagebox
+import pygame
+from threading import Thread
+
+MAX_FILENAME_LENGTH = 245  # Maximum length for playlist filenames
+
+class MusicPlayer:
+    def __init__(self):
+        self.playlists_history = []  # To keep track of played playlists
+        self.current_playlist = []   # To store the current playlist being played
+        self.current_index = 0       # Index of the current song in the playlist
+        self.playlist_path = ""      # Path of the current playlist file
+        self.paused = False          # Flag to indicate if music is paused
+        self.running = True          # Flag to indicate if the player is running
+        self.volume = 0.5            # Initial volume setting (0.0 to 1.0)
+
+    def load_playlist(self, playlist_path):
+        try:
+            if not os.path.isfile(playlist_path):
+                print(f"Error: Playlist file '{playlist_path}' not found.")
+                return False
+
+            self.stop()  # Stop current playing
+            self.current_playlist.clear()  # Clear current playlist
+            self.current_index = 0  # Reset current index
+            self.playlist_path = playlist_path  # Track current playlist path
+
+            with open(playlist_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('#EXTM3U') or line.startswith('#EXTINF'):
+                        continue  # Skip m3u header and info lines
+                    elif line.startswith('# Song:'):
+                        continue  # Skip specific comment lines
+                    elif line.startswith('file://'):
+                        media_path = line.replace('file:///', '')
+                        media_path = urllib.parse.unquote(media_path)  # Decode URL encoding
+                        if os.path.exists(media_path):
+                            self.current_playlist.append(media_path)
+                        else:
+                            print(f"Skipping unknown or inaccessible file: {media_path}")
+                    else:
+                        print(f"Skipping unrecognized entry in playlist: {line}")
+
+            if self.current_playlist:
+                print(f"Playlist '{os.path.basename(playlist_path)}' loaded successfully.")
+                self.update_playlists_history()  # Update history with the current playlist
+                self.play()
+                return True
+            else:
+                print(f"No valid media files found in playlist '{os.path.basename(playlist_path)}'.")
+                return False
+
+        except Exception as e:
+            print(f"Error occurred while loading playlist '{playlist_path}': {e}")
+            return False
+
+    def play(self):
+        if not self.current_playlist:
+            print("Playlist is empty. Load a playlist first.")
+            return
+
+        if self.paused:
+            pygame.mixer.music.unpause()
+            self.paused = False
+            print(f"Resumed playing: {os.path.basename(self.current_playlist[self.current_index])}")
+        else:
+            pygame.mixer.music.load(self.current_playlist[self.current_index])
+            pygame.mixer.music.set_volume(self.volume)  # Set initial volume
+            pygame.mixer.music.play()
+            print(f"Now playing: {os.path.basename(self.current_playlist[self.current_index])}")
+
+    def pause(self):
+        if pygame.mixer.music.get_busy():
+            pygame.mixer.music.pause()
+            self.paused = True
+            print("Music paused.")
+
+    def stop(self):
+        pygame.mixer.music.stop()
+        self.paused = False
+        print("Music stopped.")
+
+    def next_track(self):
+        if not self.current_playlist:
+            print("Playlist is empty. Load a playlist first.")
+            return
+
+        # Check if there's another track in the current playlist
+        if self.current_index + 1 < len(self.current_playlist):
+            self.current_index += 1
+        else:
+            # Move to the next playlist in history
+            self.advance_history()
+
+        # Play the next track
+        self.play()
+
+        return self.current_playlist[self.current_index]
+
+    def previous_track(self):
+        if not self.current_playlist:
+            print("Playlist is empty. Load a playlist first.")
+            return
+
+        # Check if there's a previous track in the current playlist
+        if self.current_index > 0:
+            self.current_index -= 1
+        else:
+            # Move to the previous playlist in history
+            self.rewind_history()
+
+        # Play the previous track
+        self.play()
+
+        return self.current_playlist[self.current_index]
+
+    def advance_history(self):
+        # Move to the next playlist in history
+        if self.playlists_history:
+            self.playlists_history.append(self.playlists_history.pop(0))  # Move first element to the end
+            self.current_playlist, self.current_index = self.playlists_history[0]
+            print(f"Now playing: {os.path.basename(self.current_playlist[self.current_index])}")
+        else:
+            print("No next track or playlist in history.")
+
+    def rewind_history(self):
+        # Move to the previous playlist in history
+        if self.playlists_history:
+            self.playlists_history.insert(0, self.playlists_history.pop())  # Move last element to the beginning
+            self.current_playlist, self.current_index = self.playlists_history[0]
+            print(f"Previous track: {os.path.basename(self.current_playlist[self.current_index])}")
+        else:
+            print("No previous track or playlist in history.")
+
+    def track_finished_event(self):
+        while self.running:
+            if pygame.mixer.music.get_busy() == 0 and not self.paused:
+                self.next_track()
+            pygame.time.wait(1000)  # Wait for 1 second between checks
+
+    def quit(self):
+        self.running = False
+
+    def set_volume(self, volume):
+        self.volume = volume
+        if pygame.mixer.music.get_busy():
+            pygame.mixer.music.set_volume(self.volume)
+            print(f"Volume set to: {self.volume:.1f}")
+
+    def get_volume(self):
+        return self.volume
+
+    def update_playlists_history(self):
+        # Store the current playlist and current song index in the history
+        self.playlists_history.append((self.current_playlist.copy(), self.current_index))
+
+    def sanitize_playlist_name(self, playlist_title):
+        valid_chars = '-_.() %s%s' % (string.ascii_letters, string.digits)
+        return ''.join(c for c in playlist_title if c in valid_chars)
+
+
+class MusicPlayerGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Music Player")
+        self.root.geometry("800x600")
+
+        self.player = MusicPlayer()
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        self.btn_load_playlist = tk.Button(self.root, text="Load Playlist", command=self.load_playlist)
+        self.btn_load_playlist.pack(pady=10)
+
+        self.btn_previous_track = tk.Button(self.root, text="Previous Track", command=self.previous_track)
+        self.btn_previous_track.pack(pady=5)
+
+        self.btn_next_track = tk.Button(self.root, text="Next Track", command=self.next_track)
+        self.btn_next_track.pack(pady=5)
+
+        self.btn_pause = tk.Button(self.root, text="Pause", command=self.pause)
+        self.btn_pause.pack(pady=5)
+
+        self.btn_stop = tk.Button(self.root, text="Stop", command=self.stop)
+        self.btn_stop.pack(pady=5)
+
+        self.volume_scale = tk.Scale(self.root, from_=0.0, to=1.0, resolution=0.1, orient=tk.HORIZONTAL,
+                                     label="Volume", command=self.set_volume)
+        self.volume_scale.set(self.player.get_volume())
+        self.volume_scale.pack(pady=10)
+
+        self.text_widget = scrolledtext.ScrolledText(self.root, width=80, height=20, wrap=tk.WORD)
+        self.text_widget.pack(pady=10, padx=10)
+
+    def load_playlist(self):
+        playlist_path = filedialog.askopenfilename(initialdir="/", title="Select Playlist",
+                                                  filetypes=(("M3U files", "*.m3u"), ("all files", "*.*")))
+        if playlist_path:
+            if self.player.load_playlist(playlist_path):
+                self.text_widget.insert(tk.END, f"Playlist '{os.path.basename(playlist_path)}' loaded successfully.\n")
+            else:
+                self.text_widget.insert(tk.END, f"Failed to load playlist: {playlist_path}\n")
+
+    def previous_track(self):
+        self.player.previous_track()
+        if self.player.current_playlist:
+            self.text_widget.insert(tk.END, f"Previous track: {os.path.basename(self.player.current_playlist[self.player.current_index])}\n")
+
+    def next_track(self):
+        next_track = self.player.next_track()
+        if next_track:
+            self.text_widget.insert(tk.END, f"Now playing: {os.path.basename(next_track)}\n")
+
+    def pause(self):
+        self.player.pause()
+        self.text_widget.insert(tk.END, "Music paused.\n")
+
+    def stop(self):
+        self.player.stop()
+        self.text_widget.insert(tk.END, "Music stopped.\n")
+
+    def set_volume(self, volume):
+        self.player.set_volume(float(volume))
+
+    def run(self):
+        # Start the track finished event loop in a separate thread
+        track_finished_thread = Thread(target=self.player.track_finished_event)
+        track_finished_thread.daemon = True  # Daemonize the thread
+        track_finished_thread.start()
+
+        self.root.mainloop()
+
+
+if __name__ == "__main__":
+    pygame.init()
+    root = tk.Tk()
+    app = MusicPlayerGUI(root)
+    app.run()
